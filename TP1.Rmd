@@ -1,0 +1,1209 @@
+---
+title: "Enfoque Estadístico del Aprendizaje - Trabajo práctico 1"
+subtitle: "Especialización en Explotación de datos y Descubrimiento del conocimiento"
+author: "Federico Picado"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+  html_notebook:
+    theme: lumen
+    toc: yes
+    toc_float: yes
+  pdf_document:
+    toc: yes
+geometry: margin=1.5cm
+options: width = 150
+fontsize: 18p
+---
+
+<style type="text/css">
+h1.title {
+  text-align: center;
+}
+h3.subtitle {
+  text-align: center;
+}
+
+h4.author {
+  text-align: center;
+}
+
+h4.date {
+  text-align: center;
+}
+
+
+</style>
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Análisis estructura y correlación
+
+En el presente trabajo, se analizará una muestra de datos provenientes de la Encuesta Permanente de Hogares (EPH) provistos por el Instituto de Estadísticas y Censos (INDEC) de la República Argentina [link](https://www.indec.gob.ar/indec/web/Institucional-Indec-BasesDeDatos). El objetivo de dicho relevamiento es poder crear una serie de modelos lineales para explicar y predecir la variable **salario_horario** de las personas según la información que proporciona la EPH para el tercer trimestre del año 2023.
+
+
+Las librerías utilizadas se muestran a continuacion.
+
+```{r, message= FALSE, warning=FALSE}
+library(tidyverse)
+library(tidymodels)
+library(readxl)
+library(visdat)
+library(corrplot)
+library(GGally)
+library(wesanderson)
+library(car)
+library(yardstick)
+library(gridExtra)
+library(grid)
+library(ggplot2)
+library(ggpubr)
+library(robustbase)
+```
+
+```{r}
+#Importo los dataset
+eph_train_2023 <- read.csv("C:/Users/Federico/Desktop/Maestria Data mining/EEA materiales/eph_train_2023.csv", header=TRUE)
+# renombro ano4 
+colnames(eph_train_2023)[colnames(eph_train_2023) == "ano4"] <- "año"
+
+
+```
+
+En primer lugar, se analizó la estructura del archivo eph_train_2023.
+
+```{r Tipo de variables}
+glimpse(eph_train_2023)
+```
+Voy a empezar describiendo las variables que son de tipo numerico. En primer instancia vemos que las variables año y trimestre, son de tipo numerico y contienen un unico valor, como era de esperar ya que la encuesta proporciona informacion del tercer trimestre del año 2023, de todas formas es correcto verificar por si hay alguna inconsistencia.
+
+```{r}
+eph_train_2023 %>% 
+  select(año) %>% 
+  distinct() %>% 
+  count()
+
+eph_train_2023 %>% 
+  select(trimestre) %>% 
+  distinct() %>% 
+  count()
+```
+
+Despues por la descripción del dataset, hay dos variables que son de tipo numerico pero en realiadad estan haciendo referencia a variables categoricas.
+
+Una de ellas es la variable aglomerado que hace referencia a Aglomerados Urbanos, a través de la incorporación a la muestra de viviendas particulares pertenecientes a localidades de 2.000 y más habitantes. Estas localidades no se encuentran comprendidas en los dominios de estimación habituales para todas las provincias, con excepción de la de Tierra del Fuego, Antártida e Islas del Atlántico Sur y la Ciudad Autónoma de Buenos Aires. 
+
+Lo mismo pasa con codigo_actividad, que es el Código de actividad económica (Clasificador de Actividades Económicas para Encuestas Sociodemográficas del Mercosur), termina siendo una variable categorica.
+
+
+```{r}
+
+# funcion para saber la cantidad de valores que pueden tomar las variables
+contar_grupos_distintos <- function(df, vars) {
+  resultados <- sapply(vars, function(var) {
+    n_distinct(df[[var]])
+  })
+  
+  resultados <- as.data.frame(t(resultados))
+  
+  return(resultados)
+}
+
+variables_num_categoricas <- c("aglomerado", "codigo_actividad")
+var_num_cate <- contar_grupos_distintos(eph_train_2023, variables_num_categoricas)
+var_num_cate
+```
+
+```{r}
+## paso aglomerado y codigo_actividad como factor.
+eph_train_2023$aglomerado=as.factor(eph_train_2023$aglomerado)
+eph_train_2023$codigo_actividad=as.factor(eph_train_2023$codigo_actividad)
+
+### vemos los niveles de las variables categoricas
+variables_categoricas <- c("region","aglomerado","codigo_actividad","asistencia_educacion","nivel_ed","tipo_establecimiento","sexo","categoria_ocupacion","cat_cantidad_empleos","alfabetismo")
+var_cate <- contar_grupos_distintos(eph_train_2023, variables_categoricas)
+var_cate
+
+```
+
+Entonces las variables de tipo categóricas son:
+
+- _region_: 6 niveles.
+- _aglomerado_: 32 niveles
+- _codigo_actividad_: 144 niveles
+- _asistencia_educacion_: 3 niveles
+- _nivel_ed _: 6 niveles.
+- _tipo_establecimiento_: 3 niveles
+- _sexo_: 2 niveles
+- _categoria_ocupacion_: 4 niveles
+- _cat_cantidad_empleos_: 2 niveles
+- _alfabetismo_: 2 niveles
+
+
+Por consiguiente las variables cuantitativas son: 
+
+- _edad_: cuantitativa discreta.
+- _salario_: cuantitativa continua.
+- _educacion_: cuantitativa discreta.
+- _horas_trabajadas_: cuantitativa discreta. 
+- _experiencia_potencial_: cuantitativa discreta. 
+- _salario_: cuantitativa continua.
+- _salario_horario_: cuantitativa continua.
+
+La variable codusu que es el id de la observacion (no me aporta al analisis) y la fecha de nacimiento, que aparece como categorica pero que tendria que ser del tipo "Date". Podria pasarlo pero dado que tengo la edad no la veo relevante.
+
+Hay datos faltantes en la muestra?
+
+```{r message=FALSE, fig.width=9}
+vis_miss(eph_train_2023)
+```
+
+Solo faltaba un registro en la variable asistencia educacion que fue eliminado.
+
+```{r }
+eph_train_2023 <- na.omit(eph_train_2023)
+```
+
+
+### Análisis exploratorio de las variables
+
+La variable **salario_horario** representa el ingreso por hora trabajada en el mes, incluyendo tanto la ocupación principal como las ocupaciones secundarias. Para calcular esta variable, se divide el salario mensual total entre las horas trabajadas en el mes. Dado que la variable "horas_trabajadas" se registra en horas semanales, es necesario convertirlas a horas mensuales multiplicándolas por 4 (asumiendo que un mes promedio tiene cuatro semanas).
+
+
+Habra una diferencia entre el salario por hora de hombres y mujeres?
+
+```{r message=FALSE, fig.width=9, warning=FALSE}
+ggplot(eph_train_2023, aes(x = sexo, y = salario_horario, fill = sexo)) +
+  geom_boxplot(color = "black") +
+  scale_fill_manual(values = c("Varon" = "#6A9FB5", "Mujer" = "#F4A582")) +
+  theme_minimal() +
+  labs(title = "Boxplot del Salario por Hora",
+       x = "Sexo",
+       y = "Salario por Hora",
+       fill = "Sexo")
+
+```
+
+En promedio pareciera no haber diferencia entre el salario por hora entre varones y  mujeres. Ahora analizo como es la relacion entre el salario por hora y el salarario mensual, teniendo en cuenta las horas trabajadas.
+
+```{r, message=FALSE, fig.width=9, warning=FALSE}
+# r.label te da la correlacion.
+ggplot(eph_train_2023, aes(x = salario, y = salario_horario, color = sexo, size = horas_trabajadas)) +
+  geom_point(alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE, color = "black") +
+  scale_color_manual(values = c("Varon" = "#6A9FB5", "Mujer" = "#F4A582")) +
+  scale_size_continuous(range = c(1, 5)) +
+  theme_minimal() +
+  labs(title = "Relación entre Salario Mensual y Salario por Hora",
+       x = "Salario Mensual",
+       y = "Salario por Hora",
+       color = "Sexo",
+       size = "Horas Trabajadas Semanales") +
+  stat_cor(aes(label = paste(..r.label.., sep = "~`,`~")), 
+           method = "pearson", label.x.npc = "left", label.y.npc = "top", size = 4)
+```
+
+Podemos observar con este grafico que pareciera que las mujeres se agrupan sobre la recta, indicando que, en promedio, trabajan menos horas semanales (tal como sugiere el tamaño de los puntos), pero tienen salarios por hora relativamente altos en comparación con su salario mensual. Mientras que los varones tienen puntos más dispersos, con muchos trabajando más horas semanales teniendo un salario por hora menor, a costa de un mejor salario. 
+
+Voy a analizar unas metricas sencillas para evaluar este punto.
+
+```{r}
+# agrupo por sexo y calculo minimo, mzximo y promedio
+resumen_salario_hora <- eph_train_2023 %>%
+  group_by(sexo) %>%
+  summarise(
+    min_horas_trabajadas = min(horas_trabajadas),
+    max_horas_trabajadas = max(horas_trabajadas),
+    avg_horas_trabajadas= mean(horas_trabajadas),
+    min_salario = min(salario),
+    max_salario = max(salario),
+    avg_salario= mean(salario),
+    avg_salario_horario= mean(salario_horario)
+  )
+resumen_salario_hora
+```
+
+Vemos que las mujeres en promedio trabajan menos horas que los hombres y tambien su salario es menor, mientras que para los varones es el caso contrario. Esto explica que no haya diferencias en el salario_horario entre hombres y mujeres. 
+
+Ahora voy a analizar como es la correlacion entre las variables numericas, primero con un grafico general discriminando entre hombres y mujeres, mostrado la correlacion entre todas las variables. 
+
+```{r, message=FALSE, fig.width=9, warning=FALSE}
+var_numericas <- eph_train_2023 %>% 
+  select(sexo,salario_horario,salario,horas_trabajadas,experiencia_potencial,edad,educacion) 
+
+var_numericas$sexo <- as.factor(var_numericas$sexo)
+
+
+pares <- ggpairs(var_numericas, aes(color=sexo, alpha=0.5),lower = list(continuous="smooth"),upper = list(continuous = wrap("cor", size = 3.5)))
+pares <- pares +scale_fill_manual(values = wes_palette("GrandBudapest2", n = 2)) + scale_color_manual(values = wes_palette("GrandBudapest2", n = 2))
+pares
+```
+
+La **Correlación** mide tanto la fuerza como el sentido de la asociación lineal que se esta evaluando.
+
+La correlación entre edad y experiencia potencial es muy alta (0.963), lo cual era esperable, ya que ambas variables están estrechamente relacionadas. Esta correlación es similar para mujeres y varones.
+
+La correlación entre salario y horas trabajadas es moderada y positiva (0.322), lo que indica que, a mayor cantidad de horas trabajadas, el salario tiende a ser mayor. Esta correlación es más fuerte en mujeres (0.346) que en varones (0.270).
+
+Para ver mejor la correlacion entre la variable salario_horario y el resto se realizan los siguientes graficos.
+
+```{r, message=FALSE, fig.width=9, warning=FALSE}
+# Seleccionamos las parejas de variables a analizar
+pairs_to_plot <- list(
+  c("salario_horario", "salario"),
+  c("salario_horario", "educacion"),
+  c("salario_horario", "edad"),
+  c("salario_horario", "horas_trabajadas"),
+  c("salario_horario", "experiencia_potencial")
+)
+
+
+# Iteramos sobre las parejas de variables y mostramos cada gráfico por separado
+# Iteramos sobre las parejas de variables y mostramos cada gráfico por separado
+lapply(pairs_to_plot, function(vars) {
+  plot <- ggplot(var_numericas, aes_string(x = vars[2], y = vars[1], color = "sexo")) +
+    geom_point(alpha = 0.5) +
+    geom_smooth(method = "lm", se = FALSE) +
+    stat_cor(aes(label = paste(..r.label.., sep = "~`,`~")), 
+             method = "pearson", label.x.npc = "left", label.y.npc = "top", size = 4) +
+    facet_wrap(~ sexo) +
+    theme_minimal() +
+    scale_color_manual(values = c("Varon" = "#6A9FB5", "Mujer" = "#F4A582"))  +
+    labs(title = paste("Relación entre", vars[1], "y", vars[2]))
+    # Es necesario imprimir el gráfico dentro de lapply
+})
+
+```
+
+Al analizar el salario horario, observamos que presenta una relación fuerte con el salario mensual, con una correlación de (0.789), lo cual tiene sentido, ya que, como se explicó anteriormente, la variable salario horario está estrechamente relacionada con el salario. Esta relación es ligeramente más alta en los varones (0.81) en comparación con las mujeres (0.77). 
+
+En cuanto a la educación, se observa una correlación positiva moderada de 0.364 con el salario horario, siendo similar para mujeres (0.38) y varones (0.36).
+
+Las demás variables presentan correlaciones débiles. La edad tiene una correlación positiva débil (0.139), levemente más alta en los varones (0.16) que en las mujeres (0.11). 
+
+Las horas trabajadas muestran una correlación negativa débil con el salario horario (-0.141), con varones presentando un valor ligeramente más fuerte (-0.163) que las mujeres (-0.134), esto tiene sentido ya que son las horas por semana las que se estan tomando, no las horas totales. 
+
+La experiencia potencial prácticamente no se correlaciona con el salario horario, mostrando un valor cercano a cero tanto en mujeres (0.0025) como en varones (0.055).
+
+
+Realizo algunos graficos mas para ver como es la relacion entre el salario horario y algunas variables categoricas.
+
+```{r, message=FALSE, fig.width=9, warning=FALSE}
+eph_train_2023 %>%
+  ggplot(aes(x = region, y = salario_horario, color = sexo)) +
+  geom_boxplot(outlier.size = 2, outlier.alpha = 0.8, coef = 0, width = 0.2, position = position_dodge(width = 0.8)) +
+  theme_minimal() +
+  labs(x = "Región", y = "Salario por hora", title = "Boxplot salario_horario por region, separado por sexo") +
+  scale_color_manual(values = c("Varon" = "#6A9FB5", "Mujer" = "#F4A582"))+  
+  theme(
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 10),
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    axis.title = element_text(size = 12),
+    legend.title = element_text(size = 10)
+  )
+
+```
+
+```{r, message=FALSE, fig.width=9, warning=FALSE}
+# Boxplot de Salario por Nivel de Educación
+ggplot(eph_train_2023, aes(x = nivel_ed, y = salario_horario, fill = nivel_ed)) +
+  geom_boxplot() +
+  labs(title = "Boxplot salario_horario por nivel educativo")
+
+
+```
+
+
+```{r, message=FALSE, fig.width=9, warning=FALSE}
+# Interacción de Sexo y Nivel de Educación
+ggplot(eph_train_2023, aes(x = nivel_ed, y = salario, color = sexo)) +
+  geom_boxplot() +
+  scale_color_manual(values = c("Varon" = "#6A9FB5", "Mujer" = "#F4A582"))+  
+  labs(title = "Boxplot salario_horario por nivel educativo, separado por sexo")
+```
+
+# Modelos lineales experiencia
+
+Primero, se ajusto un modelo de regresión para explicar el salario por hora usando únicamente la experiencia potencial como variable explicatoria.
+
+El modelo planteado se explesa a continuacion:
+
+$$ E(Salario\ horario) = \beta_0 + \beta_1\ * Experiencia\ potencial$$
+
+
+```{r}
+modelo_lineal <- lm(salario_horario ~ experiencia_potencial, data = eph_train_2023)
+```
+
+
+El segundo modelo que voy a ajustar es:
+
+$$ E(Salario\ horario) = \beta_0 + \beta_1\ * Experiencia\ potencial + \beta_2\ * Experiencia\ potencial^2$$
+
+```{r}
+modelo_cuadratico <- lm(salario_horario ~ experiencia_potencial + I(experiencia_potencial^2), data = eph_train_2023)
+```
+
+
+### Interpretacion de los modelos
+
+```{r}
+summary(modelo_lineal)
+```
+
+La interpretabilidad de los coeficientes de la ecuacion son las siguientes:
+  
+  * El valor de $\hat{\beta_0}$ indica que el salario bruto promedio es de $1133.36 para una persona con 0 años de experiencia portencial, el cual carece de sentido.
+  
+  * El valor de $\hat{\beta_1}$ indica que por cada aumento unitario en experiencia potencial el salario por hora promedio aumenta en $2,37.
+  
+Sin embargo, el R² del modelo es 0.001072, lo cual quiere decir que el modelo explica aproximadamente un 0.1% de la variabilidad del salario horario. Esto sugiere que hay otros factores importantes no incluidos en el modelo que están influyendo en el salario horario. Ademas el RSE es de 970,8 cuando el salario por hora promedio para todos los clientes es de $1186, lo que indica que el modelo no es muy útil. 
+
+
+```{r}
+#salario_hora promedio
+promedio_salario_hora= eph_train_2023 %>% 
+  summarise(avg=mean(salario_horario))
+print(promedio_salario_hora)
+```
+
+
+```{r}
+#resumen modelo cuadratico
+summary(modelo_cuadratico)
+
+# Coeficientes del modelo cuadrático
+beta_0 <- coef(modelo_cuadratico)[1]
+beta_1 <- coef(modelo_cuadratico)[2]
+beta_2 <- coef(modelo_cuadratico)[3]
+
+# Función para calcular el efecto marginal de un año adicional de experiencia en el modelo cuadrático
+efecto_marginal <- function(experiencia) {
+  return(beta_1 + 2 * beta_2 * experiencia)
+}
+
+efecto_6_anos <- efecto_marginal(6)
+cat("El efecto marginal con 6 años de experiencia es:", efecto_6_anos, "\n")
+
+efecto_35_anos <- efecto_marginal(35)
+cat("El efecto marginal con 35 años de experiencia es:", efecto_35_anos, "\n")
+```
+
+Si bien en el metodo de minimos cuadrados las estimaciones de los coeficientes son insesgados, al ir aumentando grados de una variable explicatoria empiezan a estar muy correlacionadas las mismas, lo que lleva a un aumento en el error estandar de los coeficientes, lo que hace que la estimacion sea muy poco eficiente. 
+
+Los coeficientes $\hat{\beta_1}$ y $\hat{\beta_2}$ son ambos estadísticamente significativos, lo cual indica que la experiencia potencial y su término cuadrático tienen un efecto sobre el salario por hora.
+
+Para una persona con 6 años de experiencia, tiene una contribucion marginal de 21.13, lo que indica que un año adicional de experiencia incrementaría el salario horario en aproximadamente 21 unidades.
+Para una persona con 35 años de experiencia, el efecto marginal es -7.05, lo cual muestra que el efecto de la experiencia en el salario es decreciente, e incluso negativo a niveles altos de experiencia. Esto puede indicar que, a mayores niveles de experiencia, el salario horario tiende a disminuir. 
+
+De todos modos, al igual que el modelo lineal planteado anteriormente, el modelo explica muy poco la variabiliadad de los datos, siendo el R² igual a 0.012, explicando asi el 1,12% de la variabilidad de los datos.
+
+# Modelo lineal multiple
+
+Con el fin de estimar el comportamiento de la variable salario por hora, se realizó un modelo lineal múltiple, considerando dependencias respecto de las variables años de educacion, experiencia potencial y sexo. De esta forma se busca establecer un modelo lineal multiple, donde se muestren las estimaciones parciales de las variables sobre la variable a predecir. 
+
+El modelo a ajustar es entonces:
+
+$$ 
+E(Salario\ Horario) = \beta_0 + \beta_1\ * Años\ Educacion + \beta_2\ * Experiencia\ Potencial \\
++ \beta_3\ * Experiencia\ Potencial^2 + \beta_4\ * Sexo + \beta_5\ * Sexo \cdot Años\ Educacion 
+$$
+
+Los parámetros obtenidos en este ajuste, así como su nivel de significación, se muestran a continuación.
+
+```{r}
+modelo_multiple <- lm(salario_horario ~ educacion + experiencia_potencial + I(experiencia_potencial^2)+sexo+sexo*educacion, data = eph_train_2023)
+summary(modelo_multiple)
+```
+
+### Interpretacion del modelo multiple
+
+En este contexto, la ordenada al origen $\hat{\beta_0}$ carece de sentido, ya que sería el salario por hora de una persona cuando todas las variables son cero. 
+
+El coeficiente $\hat{\beta_1}$ indica que, cuando hay un incremento unitario en los años de educacion y las otras variables tienen valores constantes, el salario por hora esperado aumenta en promedio 118,40 pesos.
+
+Un análisis similar puede realizarse para $\hat{\beta_2}$, que representa el incremento promedio del salario por hora, siendo de 23.98 al aumentarse un año la experiencia potencial, en ausencia de influencia de otras variables.
+
+El coeficiente $\hat{\beta_3}$ representa el efecto cuadrático de la experiencia potencial. El valor negativo indica que el impacto de la experiencia potencial en el salario por hora disminuye a medida que la experiencia aumenta, lo que sugiere rendimientos decrecientes de la experiencia en el salario
+
+Para estudiar el efecto del sexo, es importante tener en cuenta que la variable es categórica, el coeficiente $\hat{\beta_4}$ indica cuánto mayor es, en promedio, el incremento en el salario por hora (225.42 pesos) para varones respecto de las mujeres (categoria basal), manteniendo constantes las demás variables. 
+
+Por ultimo el coeficiente $\hat{\beta_5}$ muestra la interacción entre sexo y educación, donde el efecto positivo de la educación en el salario por hora es menor para los varones que para las mujeres. El coeficiente negativo (-6.45) sugiere que por cada año adicional de educación, la ventaja salarial de los varones sobre las mujeres disminuye en 6.45 pesos. Sin embargo, dado que el p-valor asociado a este coeficiente es mayor a 0,05, este efecto no es estadísticamente significativo. Este no es el caso de las variables años de educacion, experiencia potencial y sexo, cuyos p-valores son menores a 0.05.
+
+### Diagnostico del modelo multiple
+
+Ahora voy a analizar el cumplimiento de los supuestos del modelo lineal multiple.
+
+1. **Media cero de los errores**:
+
+$$
+E(\epsilon_i) = 0
+$$
+Los términos de error tienen una esperanza igual a cero. Esto significa que, en promedio, los errores no sesgan el analisis del modelo.
+
+2. **Homoscedasticidad**:
+
+$$
+Var(\epsilon_i) = \sigma^2
+$$
+
+Los errores tienen varianza constante y finita para todos los \( i \). Esto implica que la dispersión de los errores no cambia a lo largo de las observaciones.
+ 
+ 
+$$
+Cov(\epsilon_i, \epsilon_j) = 0 \quad \forall\ i \neq j
+$$
+
+3. **Normalidad**:
+
+Los errores siguen una distribucion normal con media 0 y varianza igual a σ²
+
+$$
+\epsilon_i \sim N(0, \sigma^2)
+$$
+
+4. **Muestras independientes**
+
+Se busca que los errores son independientes entre sí, es decir, no hay correlación entre los errores de diferentes observaciones, y además, los errores no están correlacionados con las variables explicativas.
+
+$$
+Cov(\epsilon_i, \epsilon_j) = 0 \quad \forall\ i \neq j
+$$
+
+$$
+Cov(\epsilon_i, X_i) = 0
+$$
+
+5. **Multicolinealidad**: Las variables explicativas no deben estar correlacionadas entre si.
+
+
+El supuesto de muestras independientes es el mas facil de comprobar ya que, básicamente, lo que se requiere es que cada observación en el conjunto de datos sea independiente de las demás. Esto significa que la información que aporta cada observación debe ser única y no debe estar relacionada de manera directa con las demás observaciones.
+
+Se proceden a realizar graficos diagnosticos para poner a prueba el resto de supuestos
+
+```{r}
+resumen_multiple = augment_columns(x=modelo_multiple, data = eph_train_2023)
+```
+
+```{r, message=FALSE, fig.width=9, warning=FALSE}
+# residuos vs predichos
+ggplot(resumen_multiple, aes(.fitted, .resid)) +
+  geom_point()+
+  geom_hline(size = 1, colour = "grey", linetype="dashed", yintercept = 0) +
+  geom_smooth(se = FALSE) +
+  theme_bw() +
+  labs(title = "Residuos vs valores predichos")
+
+# #Histograma residuos
+ggplot(resumen_multiple, aes(x= .std.resid)) +
+  geom_histogram(col = "white", aes( fill = ..count..), alpha = 0.75) +
+  labs(title = "Histograma de residuos estandarizados") +
+  labs(x = "Residuos estandarizados") +
+  theme_bw()
+
+## qqplot
+
+ggplot(resumen_multiple, aes(sample= .std.resid))+
+  stat_qq()+
+  geom_abline() +
+  theme_bw() +
+  labs(title = "Normal QQ plot")
+
+# Residuos estandarizados vs predichos
+
+ggplot(resumen_multiple, aes(.fitted, sqrt(abs(.std.resid))))+
+  geom_point()+
+  geom_smooth(se = FALSE) +
+  theme_bw() +
+  labs(title = "Residuos estandarizados vs predichos")
+
+## Leverage vs residuos estandarizados
+
+ggplot(resumen_multiple, aes(.hat, .std.resid)) + # hat, palanca
+  geom_vline(size = 2, colour = "white", xintercept = 0) +
+  geom_hline(size = 1, colour = "grey", linetype="dashed", yintercept = 0) +
+  geom_point() + geom_smooth(se = FALSE) +
+  theme_bw() +
+  labs(title = "residuos vs Leverage")
+```
+
+
+```{r}
+# colinealidad
+vif(modelo_multiple)
+```
+
+Podemos observar que los supuestos de normalidad, homocedasticidad y colinealiadad no se cumplen en el modelo. En el gráfico Q-Q plot, los residuos se desvían significativamente de la diagonal, lo que indica una falta de normalidad. Además, en el gráfico de residuos estandarizados versus valores predichos, se evidencia una estructura en los residuos, lo que sugiere la presencia de heterocedasticidad.
+
+Al calcular el faltor de la inflacion de la varianza, vemos que hay gran colinealidad de las variables explicatorias, pero tiene sentido que asi sea. El agregar una interaccion va a introducir colinealiadad con las mismas variables y sumar grados a una variable tambien creara una colinealidad. Podemos ver esto creando un modelo donde sacamos la interaccion y le sacamos el grado 2 a la experiencia potencial.
+
+```{r}
+modelo_aux <- lm(salario_horario ~ educacion + experiencia_potencial+sexo, data = eph_train_2023)
+vif(modelo_aux)
+```
+
+También encontramos valores atípicos que podrían generar un alto apalancamiento. Estos valores atípicos tienen el potencial de influir de manera desproporcionada en la estimación de los coeficientes, lo que afecta la estabilidad del modelo.
+
+Aunque los p-valores de los coeficientes podrían sugerir significancia estadística, la combinación de heterocedasticidad, falta de normalidad y colinealidad indica que estos estimadores no son eficientes. Como resultado, las pruebas de significancia podrían no ser confiables.
+
+Finalmente, el modelo no es adecuado para explicar el salario por hora de los trabajadores, ya que el valor de R² ajustado es solo 0.16, lo que indica que el modelo explica apenas el 16% de la variabilidad en los datos.
+
+# Modelo de Mincer “enriquecido”
+
+Ahora se procede a modelar el log salario por hora en funcion de las mismas variables que el modelo lineal multiple.
+
+El modelo planteado es el siguiente: 
+
+$$ 
+E(Salario\ Horario\ log) = \beta_0 + \beta_1\ * Años\ Educacion + \beta_2\ * Experiencia\ Potencial \\
++ \beta_3\ * Experiencia\ Potencial^2 + \beta_4\ * Sexo + \beta_5\ * Sexo \cdot Años\ Educacion 
+$$
+```{r}
+modelo_micer <- lm(log(salario_horario) ~ educacion + experiencia_potencial + I(experiencia_potencial^2)+ sexo+ sexo*educacion, data = eph_train_2023)
+```
+
+### Interpretacion del modelo Micer enriquesido
+
+```{r}
+summary(modelo_micer)
+```
+
+En cuanto a la significatividad de los coeficientes respecto al modelo anterior, solo se observa un cambio en la significancia de la interacción entre años de educación y sexo, cuyo coeficiente ahora si es significativo. Esto quiere decir que el efecto de los años de educacion no son los mismos para hombres que para las mujeres. 
+
+El valor del coeficiente estimado que marca la interaccion es -0.01154 indicando que, para los varones, el efecto de cada año adicional de educación sobre el salario por hora es 1.154% menor en comparación con el efecto observado en las mujeres por cada año adicional de educación, manteniendo constantes las demás variables.
+
+Dado esto, la interpretación del coeficiente asociado a la variable de años de educación, tiene dos interpretaciones;
+
+Para los varones, el impacto de la educación es reducido por el valor del coeficiente de interacción (-0.01154). Por lo tanto, para un varón, el aumento porcentual en el salario por hora por cada año adicional de educación es 9.63% − 1.154% = 8.476%, manteniendo constantes las demás variables.
+
+Para mujeres, cada año adicional de educación está asociado, en promedio, a un aumento del 9.63% en el salario por hora, manteniendo constantes las demás variables.
+
+Esta diferencia entre hombres y mujeres en el impacto de la educación sobre el salario queda clara debido a que el coeficiente de interacción entre educación y sexo es significativo.
+
+En el siguiente grafico se puede observar como las pendientes no son paralelas.
+
+```{r, message=FALSE, fig.width=9, warning=FALSE}
+ggplot(eph_train_2023, aes(x = educacion, y = log(salario_horario), color = sexo)) +  
+  geom_point(size = 2) +        
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(title = "Perfiles", 
+       x = "Años de educacion", 
+       y = "Log(salario_horario)") + 
+  theme_bw() +                                   
+  scale_color_manual(values = c("Varon" = "#6A9FB5", "Mujer" = "#F4A582"))+ 
+  theme(legend.position = "right")
+```
+
+Comparemos la variablidad explicada de ambos modelos.
+
+```{r}
+# armamos lista con todos los modelos
+models <- list(modelo_micer = modelo_micer, modelo_multiple = modelo_multiple)
+# calculamos las variables resumen
+map_df(models, tidy, .id = "model")
+```
+
+```{r}
+# calculamos las métricas para todos los modelos
+df_evaluacion_train = map_df(models, glance, .id = "model") %>%
+  # ordenamos por R2 ajustado
+  arrange(desc(adj.r.squared))
+
+df_evaluacion_train
+```
+
+El porcentaje de variabilidad explicada por el modelo_micer mirando el R² ajustado es de 0.1932, por lo que el modelo estaria explicando porcentualmente el 19.32% de la variabilidad de los datos. 
+
+En el modelo multiple mirando el R² ajustado se explica el 16,67% de la variabilidad de los datos.
+
+Como los dos modelos tienen la misma cantidad de covariables es posible compararlos mediante el el R-cuadrado simple, donde se logra explicar un 2.65% (19.36 - 16.71) en el porcentaje de la variabilidad de los datos en el modelo_micer por sobre el modelo multiple.
+
+### Diagnostico del modelo_micer
+
+```{r}
+plot(modelo_micer)
+```
+
+```{r}
+vif(modelo_micer)
+```
+
+El logaritmo transforma la distribucion de la variable salario por hora. En primer lugar, se puede ver en el gráfico de residuos vs. valores predichos que la dispersión de residuos se mantiene más o menos constante para todos los valores predichos, no se observan valores mayores de residuos en ciertas partes del gráfico, o algún tipo de estructura en los residuos que pudiera sugerir que el modelo lineal no es un enfoque adecuado. 
+
+Más aún, en el gráfico de residuos estandarizados versus predichos no se detectan estructuras, y los residuos parecen distribuirse aleatoriamente a ambos lados de la recta graficada. Por ello, se puede afirmar que el supuesto de homocedasticidad se cumple, a pesar de la presencia de outliers severos (indicados en las figuras).
+
+El gráfico cuantil-cuantil presenta desviaciones respecto de la distribución teórica, que se hacen más evidentes para valores más alejados del centro. Sin embargo, teniendo en cuenta el TCL, poder inferir que los coeficientes estimados siguen una distribucion normal.
+
+Al igual que el modelo anterior existe colinealiadad entre las variables pero por como esta planteado el modelo es de esperar. 
+
+Finalmente, analizando el gráfico de leverage vs. residuos, pueden detectarse observaciones con alto apalancamiento, que se alejan de la nube principal de puntos. Sin embargo, ningún punto se encuentra más allá de la distancia de Cook, por lo que puede afirmarse que no hay observaciones influyentes en el conjunto de datos. 
+
+
+# Modelos propios y evaluación
+
+Se propusieron dos modelos lineales múltiples adicionales para explicar el comportamiento de la variable salario por hora.
+
+Como ya se menciono con anterioridad, el salario_horario esta compuesto por el salario y las horas trabajas por lo que no voy a agregar estas variables directamente a un modelo ya que no le veo mucho sentido.
+
+Para esto se creo el promedio del salario por region, nivel educativo y categoria ocupacion. 
+
+Ademas se creo en la variable promedio de horas trabajadas por sexo, ya habiamos visto que en promedio los hombres trabajan mas horas que las mujeres.
+
+La variable experiencia_potencial tiene errores, personas con 29 años de edad que tienen 20 años de experiencia potencial. Si la diferencia entre edad y experiencia potencial es menor a 15 años completo la experiencia potencial con la mediana. 
+
+Lo modelos se expresan a continuación:
+
+**Modelo_promedio:** Compuesto por las variables promedio que cree y la experiencia potencial corregida.
+
+$$
+E(Salario\ Horario) = \beta_0 + \beta_1 \cdot Salario\ Promedio\ Región + \beta_2 \cdot Salario\ Promedio\ Nivel\ Educativo +\\ \beta_3 \cdot Salario\ Promedio\ Categoría\ Ocupación + \beta_4 \cdot Promedio\ Horas\ Trabajadas\ Sexo +\\ \beta_5 \cdot Experiencia\ Potencial\ Corregida
+$$
+
+**Modelo_completo:** Compuesto por las variables promedio que cree mas las variables originales del modelo simple, teniendo en cuenta la correccion para experiencia potencial.
+
+$$
+E(Salario\ Horario) = \beta_0 + \beta_1 \cdot Salario\ Promedio\ Región + \beta_2 \cdot Salario\ Promedio\ Nivel\ Educativo +\\ \beta_3 \cdot Salario\ Promedio\ Categoría\ Ocupación + \beta_4 \cdot Promedio\ Horas\ Trabajadas\ Sexo +\\ \beta_5 \cdot Edad + \beta_6 \cdot Experiencia\ Potencial\ Corregida + \beta_7 \cdot Región + \beta_8 \cdot Asistencia\ Educación +\\ \beta_9 \cdot Nivel\ Educativo + \beta_{10} \cdot Tipo\ Establecimiento + \beta_{11} \cdot Sexo +\\ \beta_{12} \cdot Categoría\ Ocupación + \beta_{13} \cdot Categoría\ Cantidad\ Empleos + \beta_{14} \cdot Alfabetismo + \beta_{15} \cdot Años\ Educación
+$$
+
+
+```{r}
+# Salario horario promedio por región
+salario_promedio_region <- eph_train_2023 %>%
+  group_by(region) %>%
+  summarise(avg_region = mean(salario_horario))
+
+eph_train_2023 <- eph_train_2023 %>%
+  left_join(salario_promedio_region, by = "region")
+
+# Salario horario promedio por nivel educativo
+salario_promedio_nivel_ed <- eph_train_2023 %>%
+  group_by(nivel_ed) %>%
+  summarise(avg_nivel_ed = mean(salario_horario))
+
+eph_train_2023 <- eph_train_2023 %>%
+  left_join(salario_promedio_nivel_ed, by = "nivel_ed")
+
+#salario horario promedio por categoria_ocupacion
+salario_promedio_categoria_ocupacion<- eph_train_2023 %>%
+  group_by(categoria_ocupacion) %>%
+  summarise(avg_categoria_ocupacion = mean(salario_horario))
+
+eph_train_2023 <- eph_train_2023 %>%
+  left_join(salario_promedio_categoria_ocupacion, by = "categoria_ocupacion")
+
+#salario horario promedio por categoria_ocupacion
+horas_promedio_sexo<- eph_train_2023 %>%
+  group_by(sexo) %>%
+  summarise(avg_horas_trabajadas_sexo = mean(horas_trabajadas))
+
+eph_train_2023 <- eph_train_2023 %>%
+  left_join(horas_promedio_sexo, by = "sexo")
+```
+
+
+```{r}
+# media experiencia.
+media_experiencia <- median(eph_train_2023$experiencia_potencial)
+
+# Crear la nueva columna con experiencia corregida
+eph_train_2023$experiencia_potencial_corregida <- ifelse((eph_train_2023$edad - eph_train_2023$experiencia_potencial) < 15, media_experiencia,eph_train_2023$experiencia_potencial)
+```
+
+
+```{r}
+## variables multicategoricas a dummies:
+eph_train_2023$region=as.factor(eph_train_2023$region)
+eph_train_2023$nivel_ed=as.factor(eph_train_2023$nivel_ed)
+eph_train_2023$categoria_ocupacion=as.factor(eph_train_2023$categoria_ocupacion)
+eph_train_2023$tipo_establecimiento=as.factor(eph_train_2023$tipo_establecimiento)
+eph_train_2023$cat_cantidad_empleos=as.factor(eph_train_2023$cat_cantidad_empleos)
+eph_train_2023$asistencia_educacion=as.factor(eph_train_2023$asistencia_educacion)
+eph_train_2023$sexo=as.factor(eph_train_2023$sexo)
+eph_train_2023$alfabetismo=as.factor(eph_train_2023$alfabetismo)
+
+# Modelo promedio
+Modelo_promedio <- lm(
+  salario_horario ~ avg_region + avg_nivel_ed + avg_categoria_ocupacion + avg_horas_trabajadas_sexo,
+  data = eph_train_2023
+)
+
+# Modelo completo
+Modelo_completo <- lm(
+  salario_horario ~ avg_region + avg_nivel_ed + avg_categoria_ocupacion + avg_horas_trabajadas_sexo + edad + experiencia_potencial_corregida  + region + asistencia_educacion +
+  nivel_ed + tipo_establecimiento + sexo + categoria_ocupacion +
+  cat_cantidad_empleos + alfabetismo + educacion,
+  data = eph_train_2023
+)
+
+```
+
+
+### Evaluacion en el conjunto de train
+
+Se evaluó la performance de todos los modelos propuestos en el presente trabajo. En primer lugar, se compararon sus resultados en el conjunto de datos de entrenamiento. Se analizaron los valores obtenidos para el R² ajustado, que tiene en cuenta la cantidad de variables empleadas para el ajuste.
+
+```{r}
+#listo los modelos
+modelos=list(Modelo_promedio=Modelo_promedio, Modelo_completo=Modelo_completo, modelo_multiple=modelo_multiple, modelo_micer=modelo_micer)
+
+df_evaluacion_train = map_df(modelos, glance, .id = "model") %>%
+  arrange(desc(adj.r.squared))
+
+df_evaluacion_train
+```
+
+
+De acuerdo a la tabla, los mejores resultados se obtuvieron con el Modelo completo dondel el R²ajustado es de 0.24, explicando asi el 24% de la variabilidad de los datos. 
+
+Ahora se procedera a evaluar el la performance en términos del RMSE, que mide el promedio de las diferencias cuadradas entre los valores predichos y los observados. El MAE mide el error promedio absoluto, lo que da una idea de la magnitud del error sin penalizar demasiado los valores atípicos.
+
+
+```{r}
+# Lista de predicciones, conjunto de entrenamiento
+lista_predicciones_train <- map(
+  .x = modelos,
+  .f = function(model) augment(model, data = eph_train_2023)
+)
+```
+
+```{r}
+# Este codigo me permite mapear las prediccion del modelo multpli log y a esas aplicarle exp(.fitted)
+
+lista_predicciones_train <- map2(
+  .x = lista_predicciones_train,
+  .y = names(lista_predicciones_train),
+  .f = function(data, model_name) {
+    if (model_name == "modelo_micer2") {
+      data %>% mutate(.fitted_adj = exp(.fitted))
+    } else {
+      data %>% mutate(.fitted_adj = .fitted)
+    }
+  }
+)
+```
+
+
+```{r}
+# Defino las metricas a evaluar
+metric_train_set <- metric_set(rmse, mae)
+
+# Calculo las metricas
+metricas_train <- map_dfr(
+  .x = lista_predicciones_train,
+  .f = function(data) {
+    metric_train_set(data = data, truth = salario_horario, estimate = .fitted_adj)
+  },
+  .id = "models"
+)
+
+# Reorganizo el df para que se vea mejor
+metricas_train_wide <- metricas_train %>% pivot_wider(
+  names_from = .metric,
+  values_from = .estimate
+)
+
+metricas_train_wide=metricas_train_wide %>% arrange(rmse)
+metricas_train_wide
+```
+
+
+En el conjunto de entrenamiento vemos que el Modelo Completo es el que tiene mayor performance debido a tanto el RMSE y MAE son los menos en comparacion con el resto de modelos. 
+
+### Evaluacion en el conjunto de test
+
+Luego, se comparó la performance de todos los modelos en el set de evaluacion, donde se tuvieron las mismas cocideraciones para la creacion de features que en el conjunto de entrenamiento. Para ello, se agregaron las predicciones al dataset, y se calculó el RMSE y MAE en cada caso. 
+
+```{r}
+#levanto el df_test
+eph_test_2023 <- read.csv("C:/Users/Federico/Desktop/Maestria Data mining/EEA materiales/eph_test_2023.csv", header=TRUE)
+colnames(eph_test_2023)[colnames(eph_test_2023) == "ano4"] <- "año"
+eph_test_2023$salario_horario_log=log(eph_test_2023$salario_horario)
+
+# media experiencia.
+media_experiencia <- median(eph_test_2023$experiencia_potencial, na.rm = TRUE)
+
+# Crear la nueva columna con experiencia corregida
+eph_test_2023$experiencia_potencial_corregida <- ifelse((eph_test_2023$edad - eph_test_2023$experiencia_potencial) < 15, media_experiencia,eph_test_2023$experiencia_potencial)
+
+
+# variables categoricas a dummies
+
+eph_test_2023$aglomerado=as.factor(eph_test_2023$aglomerado)
+eph_test_2023$region=as.factor(eph_test_2023$region)
+eph_test_2023$nivel_ed=as.factor(eph_test_2023$nivel_ed)
+eph_test_2023$categoria_ocupacion=as.factor(eph_test_2023$categoria_ocupacion)
+eph_test_2023$tipo_establecimiento=as.factor(eph_test_2023$tipo_establecimiento)
+eph_test_2023$cat_cantidad_empleos=as.factor(eph_test_2023$cat_cantidad_empleos)
+eph_test_2023$codigo_actividad=as.factor(eph_test_2023$codigo_actividad)
+eph_test_2023$asistencia_educacion=as.factor(eph_test_2023$asistencia_educacion)
+eph_test_2023$sexo=as.factor(eph_test_2023$sexo)
+eph_test_2023$alfabetismo=as.factor(eph_test_2023$alfabetismo)
+
+## para test
+
+# Salario horario promedio por región para eph_test_2023
+salario_promedio_region_test <- eph_test_2023 %>%
+  group_by(region) %>%
+  summarise(avg_region = mean(salario_horario))
+
+eph_test_2023 <- eph_test_2023 %>%
+  left_join(salario_promedio_region_test, by = "region")
+
+# Salario horario promedio por nivel educativo para eph_test_2023
+salario_promedio_nivel_ed_test <- eph_test_2023 %>%
+  group_by(nivel_ed) %>%
+  summarise(avg_nivel_ed = mean(salario_horario))
+
+eph_test_2023 <- eph_test_2023 %>%
+  left_join(salario_promedio_nivel_ed_test, by = "nivel_ed")
+
+# Salario horario promedio por categoria_ocupacion para eph_test_2023
+salario_promedio_categoria_ocupacion_test <- eph_test_2023 %>%
+  group_by(categoria_ocupacion) %>%
+  summarise(avg_categoria_ocupacion = mean(salario_horario))
+
+eph_test_2023 <- eph_test_2023 %>%
+  left_join(salario_promedio_categoria_ocupacion_test, by = "categoria_ocupacion")
+
+# Promedio de horas trabajadas por sexo para eph_test_2023
+horas_promedio_sexo_test <- eph_test_2023 %>%
+  group_by(sexo) %>%
+  summarise(avg_horas_trabajadas_sexo = mean(horas_trabajadas))
+
+eph_test_2023 <- eph_test_2023 %>%
+  left_join(horas_promedio_sexo_test, by = "sexo")
+
+```
+
+```{r}
+# Lista de predicciones, conjunto de entrenamiento
+lista_predicciones_test <- map(
+  .x = modelos,
+  .f = function(model) augment(model, newdata = eph_test_2023)
+)
+```
+
+```{r}
+# Este codigo me permite mapear las prediccion del modelo multpli log y a esas aplicarle exp(.fitted)
+
+lista_predicciones_test <- map2(
+  .x = lista_predicciones_test,
+  .y = names(lista_predicciones_test),
+  .f = function(data, model_name) {
+    if (model_name == "modelo_micer2") {
+      data %>% mutate(.fitted_adj = exp(.fitted))
+    } else {
+      data %>% mutate(.fitted_adj = .fitted)
+    }
+  }
+)
+```
+
+```{r}
+# Defino las metricas a evaluar
+metricas_test_set <- metric_set(rmse, mae)
+
+# Calculo las metricas
+metricas_test<- map_dfr(
+  .x = lista_predicciones_test,
+  .f = function(data) {
+    metricas_test_set(data = data, truth = salario_horario, estimate = .fitted_adj)
+  },
+  .id = "models"
+)
+
+# Reorganizo el df para que se vea mejor
+metricas_test_wide <- metricas_test %>% pivot_wider(
+  names_from = .metric,
+  values_from = .estimate
+)
+
+metricas_test_wide=metricas_test_wide %>% arrange(rmse)
+metricas_test_wide
+```
+
+
+```{r}
+#comparo los valores re RMSE y MAE tanto en train comom en test.
+metricas_train_wide <- metricas_train_wide %>%
+  mutate(dataset = "train")
+
+metricas_test_wide <- metricas_test_wide %>%
+  mutate(dataset = "test")
+
+# Unir ambas tablas
+metricas_unidas <- bind_rows(metricas_train_wide, metricas_test_wide)
+metricas_unidas
+```
+
+El Modelo_completo presenta los valores más bajos de RMSE y MAE tanto en el conjunto de train como en el de test en comparacion con el resto de modelos. Ademas estos valores no difieren mucho de los valores en el conjunto de train por lo que no estariamos en precencia de overfitting. 
+Dado que el modelo completo tiene los valores más bajos de RMSE y MAE tanto en el conjunto de entrenamiento como en el de evaluación, y no presenta signos de sobreajuste, lo considero el modelo más adecuado para predecir el salario horario en este contexto.
+
+
+# Modelo lineal robusto
+
+Finalmente, se analizó la performance del modelo lineal multiple, el modelo de mincer y un modelo robusto (misma especificación que el modelo lineal multiple). Para ello, los modelos fueron entrenados nuevamente con un conjunto de datos con outliers y se compararon los coeficientes estimados junto con sus valroes de significacion. Ademas, se evaluo su rendimiento tanto en el conjunto de train como en el conjunto de test las métricas RMSE y MAE. 
+
+### Análisis exploratorio 
+
+En primer lugar, se realizó un análisis exploratorio del nuevo conjunto de datos, a fin de detectar diferencias respecto del dataset original empleado en el presente trabajo.
+
+```{r, message=FALSE}
+#levanto el dataset
+eph_train_outliers_2023 <- read.csv("C:/Users/Federico/Desktop/Maestria Data mining/EEA materiales/eph_train_outliers_2023.csv", header=TRUE)
+glimpse(eph_train_outliers_2023)
+```
+
+```{r, message=FALSE, fig.width=9, warning=FALSE}
+vis_miss(eph_train_outliers_2023)
+```
+
+Al igual que el dataset de train sin outliers, esta presente el mismo dato faltante por lo que sera eliminado.
+
+```{r}
+colSums(is.na(eph_train_outliers_2023))## un solo dato faltante, el mismo que en eph_train_2023
+eph_train_outliers_2023 <- na.omit(eph_train_outliers_2023)
+```
+
+
+```{r}
+# para ver cuales son las filas que se agregaron.
+diferencias_outliers <- anti_join(eph_train_outliers_2023, eph_train_2023, by = "codusu")
+diferencias_outliers
+```
+
+
+
+```{r, message=FALSE, fig.width=9, warning=FALSE}
+ggplot(eph_train_2023, aes(x = edad, y = salario_horario, color = sexo)) +  
+  geom_point(size = 2) +        
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(title = "Salario_horario en funcion de años de educacion, sin outliers", 
+       x = "Años de educacion", 
+       y = "salario_horario") + 
+  theme_bw() +                                   
+  scale_color_manual(values = c("Varon" = "#6A9FB5", "Mujer" = "#F4A582"))+ 
+  theme(legend.position = "right")
+```
+```{r, message=FALSE, fig.width=9, warning=FALSE}
+# Quiero marcar una linea que separe el maximo valor de salario horario de train sin outliers
+linea= max(eph_train_2023$salario_horario)
+
+ggplot(eph_train_outliers_2023, aes(x = edad, y = salario_horario, color = sexo)) +  
+  geom_point(size = 2) +        
+  geom_smooth(method = "lm", se = FALSE) +
+  geom_hline(yintercept = linea, linetype = "dashed", color = "red") +  # Agrega la línea horizontal
+  labs(title = "Salario_horario en funcion de años de educacion, con outliers", 
+       x = "Años de educación", 
+       y = "Salario horario") + 
+  theme_bw() +    
+  scale_color_manual(values = c("Varon" = "#6A9FB5", "Mujer" = "#F4A582"))+  
+  theme(legend.position = "right")
+```
+
+Habia 11 registros mas en el dataset con outliers y pareciera que los 11 tienen un salario_horario mayor que el maximo valor en el dataset sin outliers. Esto se debe a que tiene un sueldo muy elevado con horas trabajas promedio o tienen un salario normal pero con muy pocas horas trabajadas.
+
+A continuacion se proceden a plantear el modelo lineal multiple, el modelo de micer y el modelo robusto.
+
+El modelo lineal multiple y el robusto tienen la misma especificacion, lo que los diferencia es con el paquete que se los modela, que para el caso del modelo robusto es lmrob() de la librería robustbase.
+
+$$ 
+E(Salario\ Horario) = \beta_0 + \beta_1\ * Años\ Educacion + \beta_2\ * Experiencia\ Potencial \\
++ \beta_3\ * Experiencia\ Potencial^2 + \beta_4\ * Sexo + \beta_5\ * Sexo \cdot Años\ Educacion 
+$$
+
+```{r}
+# se ajustan los modelos.
+modelo_multiple2 <- lm(salario_horario ~ educacion + experiencia_potencial + I(experiencia_potencial^2)+sexo+sexo*educacion, data = eph_train_outliers_2023)
+
+modelo_micer2 <- lm(log(salario_horario) ~ educacion + experiencia_potencial + I(experiencia_potencial^2)+ sexo+ sexo*educacion, data = eph_train_outliers_2023)
+
+modelo_robusto <- lmrob(salario_horario ~ educacion + experiencia_potencial + I(experiencia_potencial^2)+sexo+sexo*educacion, data = eph_train_outliers_2023)
+
+```
+
+Como ya sabemos que hay presencia de outliers es esperado que los coeficientes estimados y la significacion cambie entre el modelo lineal multiple y el robusto.
+
+```{r}
+summary(modelo_multiple2)
+```
+
+```{r}
+summary(modelo_robusto)
+```
+
+Al ver el resumen de ambos modelos vemos que es justamente lo que pasa, en el modelo robusto todos coeficientes dan significativas y se observa una disminucion de los valores de los coeficientes estimados y de su error estandar para educacion sexo y el intercepto. En el modelo lineal multiple (no robusto), el sexo y la interaccion educacion:sexoVaron no eran significativos. 
+
+La variacion de los coeficientes de ambos modelos se puede obervar mejor en los siguientes graficos.
+
+```{r, message=FALSE, fig.width=9, warning=FALSE}
+
+tidy_modelo_multiple2 <- tidy(modelo_multiple2, conf.int = TRUE)
+
+## coloreo solo los coeficientes que no son significativos
+coef_modelo_multiple2 <- ggplot(tidy_modelo_multiple2, aes(estimate, term, color=p.value > 0.05, xmin = conf.low, xmax = conf.high, height = 0)) +
+  geom_point() +
+  geom_vline(xintercept = 0, lty = 4, color = "red") +
+  geom_errorbarh() +
+  scale_color_manual(values = wes_palette("GrandBudapest2", n = 2))+
+  guides(color="none") +
+  labs(y = "Coeficientes β", x = "Valor estimado")+
+  theme_bw()
+coef_modelo_multiple2
+```
+
+
+```{r, message=FALSE, fig.width=9, warning=FALSE}
+tidy_modelo_robusto <- tidy(modelo_robusto, conf.int = TRUE)
+
+## coloreo solo los coeficientes que no son significativos
+coef_modelo_robusto <- ggplot(tidy_modelo_robusto, aes(estimate, term, color=p.value > 0.05, xmin = conf.low, xmax = conf.high, height = 0)) +
+  geom_point() +
+  geom_vline(xintercept = 0, lty = 4, color = "red") +
+  geom_errorbarh() +
+  scale_color_manual(values = wes_palette("GrandBudapest2", n = 2))+
+  guides(color="none") +
+  labs(y = "Coeficientes β", x = "Valor estimado")+
+  theme_bw()
+
+coef_modelo_robusto
+```
+
+
+### Evaluacion en el conjunto de train
+
+Se procede a evaluar estos modelos en el conjunto de train, obteniendo el RMSE y MAE.
+
+```{r}
+#listo los modelos
+modelos=list(modelo_multiple2=modelo_multiple2, modelo_micer2=modelo_micer2, modelo_robusto=modelo_robusto)
+map_df(models, tidy, .id = "model")
+```
+
+```{r}
+
+df_evaluacion_train = map_df(modelos, glance, .id = "model") %>%
+  arrange(desc(adj.r.squared))
+
+df_evaluacion_train
+```
+
+```{r}
+# Lista de predicciones, conjunto de entrenamiento
+lista_predicciones_train <- map(
+  .x = modelos,
+  .f = function(model) augment(model, data = eph_train_outliers_2023)
+)
+```
+
+```{r}
+# Este codigo me permite mapear las prediccion del modelo micer2 y a esas aplicarle exp(.fitted)
+
+lista_predicciones_train <- map2(
+  .x = lista_predicciones_train,
+  .y = names(lista_predicciones_train),
+  .f = function(data, model_name) {
+    if (model_name == "modelo_micer2") {
+      data %>% mutate(.fitted_adj = exp(.fitted))
+    } else {
+      data %>% mutate(.fitted_adj = .fitted)
+    }
+  }
+)
+```
+
+
+```{r}
+# Defino las metricas a evaluar
+metric_train_set <- metric_set(rmse, mae)
+
+# Calculo las metricas
+metricas_train <- map_dfr(
+  .x = lista_predicciones_train,
+  .f = function(data) {
+    metric_train_set(data = data, truth = salario_horario, estimate = .fitted_adj)
+  },
+  .id = "models"
+)
+
+# Reorganizo el df para que se vea mejor
+metricas_train_wide <- metricas_train %>% pivot_wider(
+  names_from = .metric,
+  values_from = .estimate
+)
+
+metricas_train_wide=metricas_train_wide %>% arrange(rmse)
+metricas_train_wide
+```
+
+
+### Evaluacion en el conjunto de test
+
+```{r}
+# Lista de predicciones, conjunto de entrenamiento
+lista_predicciones_test <- map(
+  .x = modelos,
+  .f = function(model) augment(model, newdata = eph_test_2023)
+)
+```
+
+```{r}
+# Este codigo me permite mapear las prediccion del modelo multpli log y a esas aplicarle exp(.fitted)
+
+lista_predicciones_test <- map2(
+  .x = lista_predicciones_test,
+  .y = names(lista_predicciones_test),
+  .f = function(data, model_name) {
+    if (model_name == "modelo_micer2") {
+      data %>% mutate(.fitted_adj = exp(.fitted))
+    } else {
+      data %>% mutate(.fitted_adj = .fitted)
+    }
+  }
+)
+```
+
+
+```{r}
+# Defino las metricas a evaluar
+metricas_test_set <- metric_set(rmse, mae)
+
+# Calculo las metricas
+metricas_test<- map_dfr(
+  .x = lista_predicciones_test,
+  .f = function(data) {
+    metricas_test_set(data = data, truth = salario_horario, estimate = .fitted_adj)
+  },
+  .id = "models"
+)
+
+# Reorganizo el df para que se vea mejor
+metricas_test_wide <- metricas_test %>% pivot_wider(
+  names_from = .metric,
+  values_from = .estimate
+)
+
+metricas_test_wide=metricas_test_wide %>% arrange(rmse)
+metricas_test_wide
+```
+
+```{r}
+#comparo los valores re RMSE y MAE tanto en train comom en test.
+metricas_train_wide <- metricas_train_wide %>%
+  mutate(dataset = "train_outliers")
+
+metricas_test_wide <- metricas_test_wide %>%
+  mutate(dataset = "test")
+
+# Uno ambas tablas
+metricas_unidas <- bind_rows(metricas_train_wide, metricas_test_wide)
+metricas_unidas
+
+```
+
+El modelo multiple presenta un RMSE menor que el modelo robusto, tanto en train como en test. Pero el modelo robusto presenta un menor valor de MAE en comparacion con el modelo multiple tanto en train como en test. El RMSE menor en el modelo múltiple podría deberse a que tiene algunos errores muy pequeños que reducen el RMSE, pero posiblemente tenga errores más grandes en otros puntos (reflejado en el MAE más alto). El MAE menor en el modelo robusto indica que, en promedio, los errores son menores, aunque puede tener algunos errores más grandes que aumentan el RMSE
+
+Dado esto, paso a mirar como es el R² de ambos modelos y el modelo robusto presenta un R² de 0.20, en comparacion con el modelo multiple que presenta un R² de 0.10. Al momento de decidir que modelo va a predecir mejor me quedo con el modelo robusto, aunque el RMSE es ligeramente mayor en el modelo robusto, el MAE menor y el mejor R² indican un desempeño más consistente y una mejor capacidad de generalización.
