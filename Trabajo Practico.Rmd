@@ -1,5 +1,5 @@
 ---
-title: "Enfoque Estadístico del Aprendizaje - Trabajo práctico 1"
+title: "Enfoque Estadístico del Aprendizaje - Trabajo Práctico 1"
 subtitle: "Especialización en Explotación de datos y Descubrimiento del conocimiento"
 author: "Federico Picado"
 output:
@@ -66,7 +66,7 @@ library(robustbase)
 
 ```{r}
 #Importo los dataset
-eph_train_2023 <- read.csv("C:/Users/Federico/Desktop/Maestria Data mining/EEA materiales/eph_train_2023.csv", header=TRUE)
+eph_train_2023 <- read.csv("eph_train_2023.csv", header=TRUE)
 # renombro ano4 
 colnames(eph_train_2023)[colnames(eph_train_2023) == "ano4"] <- "año"
 
@@ -571,17 +571,19 @@ modelo_micer <- lm(log(salario_horario) ~ educacion + experiencia_potencial + I(
 summary(modelo_micer)
 ```
 
-En cuanto a la significatividad de los coeficientes respecto al modelo anterior, solo se observa un cambio en la significancia de la interacción entre años de educación y sexo, cuyo coeficiente ahora si es significativo. Esto quiere decir que el efecto de los años de educacion no son los mismos para hombres que para las mujeres. 
+En cuanto a la significatividad de los coeficientes respecto al modelo anterior, solo se observa un cambio en la significancia de la interacción entre años de educación y sexo, cuyo coeficiente ahora sí es significativo. Esto quiere decir que el efecto de los años de educación no es el mismo para hombres que para mujeres.
 
-El valor del coeficiente estimado que marca la interaccion es -0.01154 indicando que, para los varones, el efecto de cada año adicional de educación sobre el salario por hora es 1.154% menor en comparación con el efecto observado en las mujeres por cada año adicional de educación, manteniendo constantes las demás variables.
+El valor del coeficiente estimado que marca la interacción es -0.01154, indicando que, para los varones, el efecto de cada año adicional de educación sobre el salario por hora es 1.154% menor en comparación con el efecto observado en las mujeres por cada año adicional de educación, manteniendo constantes las demás variables.
 
-Dado esto, la interpretación del coeficiente asociado a la variable de años de educación, tiene dos interpretaciones;
+Además, el coeficiente estimado para la variable sexoVaron es 0.02803, lo cual significa que, a igualdad de educación y experiencia, los varones tienen un salario base 2.8% mayor que las mujeres.
 
-Para los varones, el impacto de la educación es reducido por el valor del coeficiente de interacción (-0.01154). Por lo tanto, para un varón, el aumento porcentual en el salario por hora por cada año adicional de educación es 9.63% − 1.154% = 8.476%, manteniendo constantes las demás variables.
+Dado esto, la interpretación del coeficiente asociado a la variable de años de educación tiene dos lecturas:
 
-Para mujeres, cada año adicional de educación está asociado, en promedio, a un aumento del 9.63% en el salario por hora, manteniendo constantes las demás variables.
+* Para los varones, el impacto de la educación se ve reducido por el valor del coeficiente de interacción (-0.01154). Por lo tanto, para un varón, el aumento porcentual en el salario por hora por cada año adicional de educación es 9.63% − 1.154% = 8.476%, manteniendo constantes las demás variables. A esto se suma que, a igualdad de condiciones, los varones parten de un salario base 2.8% mayor que el de las mujeres.
 
-Esta diferencia entre hombres y mujeres en el impacto de la educación sobre el salario queda clara debido a que el coeficiente de interacción entre educación y sexo es significativo.
+* Para las mujeres, cada año adicional de educación está asociado, en promedio, a un aumento del 9.63% en el salario por hora, manteniendo constantes las demás variables.
+
+Esta diferencia entre hombres y mujeres en el impacto de la educación sobre el salario queda clara debido a que tanto el coeficiente de interacción entre educación y sexo como el efecto base de sexoVaron son significativos.
 
 En el siguiente grafico se puede observar como las pendientes no son paralelas.
 
@@ -818,7 +820,7 @@ Luego, se comparó la performance de todos los modelos en el set de evaluacion, 
 
 ```{r}
 #levanto el df_test
-eph_test_2023 <- read.csv("C:/Users/Federico/Desktop/Maestria Data mining/EEA materiales/eph_test_2023.csv", header=TRUE)
+eph_test_2023 <- read.csv("eph_test_2023.csv", header=TRUE)
 colnames(eph_test_2023)[colnames(eph_test_2023) == "ano4"] <- "año"
 eph_test_2023$salario_horario_log=log(eph_test_2023$salario_horario)
 
@@ -953,7 +955,7 @@ En primer lugar, se realizó un análisis exploratorio del nuevo conjunto de dat
 
 ```{r, message=FALSE}
 #levanto el dataset
-eph_train_outliers_2023 <- read.csv("C:/Users/Federico/Desktop/Maestria Data mining/EEA materiales/eph_train_outliers_2023.csv", header=TRUE)
+eph_train_outliers_2023 <- read.csv("eph_train_outliers_2023.csv", header=TRUE)
 glimpse(eph_train_outliers_2023)
 ```
 
