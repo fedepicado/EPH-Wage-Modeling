@@ -15,7 +15,7 @@ A partir de las variables disponibles, se busca **evaluar y comparar diferentes 
 - Analizar el trade-off entre **modelos interpretables** (sencillos, con coeficientes claros) y **modelos predictivos** (con mejor ajuste, aunque menos interpretables).  
 - Evaluar la **significancia estadística** de los predictores.  
 - Probar **modelos robustos** que permiten atenuar el impacto de outliers en los resultados.  
-- Responder a las **consignas propuestas en la guía de la materia**, documentando el proceso completo.  
+- Responder a las **consignas propuestas en la guía de la materia**, documentando el proceso completo.   
 
 ---
 
